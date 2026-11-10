@@ -142,6 +142,7 @@ body.guiding #page{padding-bottom:55vh}
     <h1>Mi Libro</h1>
     <span class="stamp">100 % local</span>
     <div class="adds">
+      <button class="btn" id="install" hidden>Instalar app</button>
       <button class="btn" id="adddir">Añadir carpeta</button>
       <label class="btn primary add">+ Añadir libro
         <input id="file" type="file" multiple accept=".pdf,.epub,.txt,application/pdf,application/epub+zip,text/plain">
@@ -819,6 +820,19 @@ $('fgo').onchange=e=>{
   closeSheet();goTo(b);
 };
 
+/* ---------- Instalación (solo en la versión publicada con manifest) ---------- */
+let instEv=null;
+const standalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();instEv=e;});
+addEventListener('appinstalled',()=>{instEv=null;$('install').hidden=true;status('Mi Libro se ha instalado.');});
+$('install').onclick=async()=>{
+  if(instEv){const e=instEv;instEv=null;e.prompt();try{await e.userChoice;}catch(x){}return;}
+  const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  status(ios?'En Safari, pulsa Compartir y elige «Añadir a pantalla de inicio».'
+    :'El navegador no ha ofrecido la instalación directa. Abre su menú ⋮ y elige «Instalar aplicación» o «Añadir a pantalla de inicio».',false,true);
+};
+$('status').onclick=()=>status('');
+
 /* ---------- Arranque ---------- */
 (async()=>{
   applyS();
@@ -828,6 +842,7 @@ $('fgo').onchange=e=>{
   await loadLib();renderLib();
   if(!DB.db)status('Este navegador no permite guardar datos: lo que añadas se perderá al cerrar la página.',true);
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});}catch(e){}
+  if(document.querySelector('link[rel="manifest"]')&&!standalone())$('install').hidden=false;
   // Solo en la versión instalable (la que trae manifest): permite abrir la app sin conexión
   if(document.querySelector('link[rel="manifest"]')&&'serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
