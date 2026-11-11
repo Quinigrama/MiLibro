@@ -271,6 +271,7 @@ function applyS(){
   for(const [id,v] of [['segw',S.width],['segf',S.font],['segp',S.paper],['segm',S.flow]])
     for(const b of $(id).children)b.setAttribute('aria-pressed',b.dataset.v===v?'true':'false');
   $('wpm').textContent=S.wpm+' ppm';
+  $('bguide').textContent=S.flow==='barrido'?'Barrido':'Línea';
 }
 
 /* ---------- Conversión de archivos ---------- */
