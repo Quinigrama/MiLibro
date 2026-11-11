@@ -204,6 +204,9 @@ body.guiding #page{padding-bottom:55vh}
       <div class="seg" id="segf"><button data-v="literata">Literata</button><button data-v="atkinson">Atkinson</button><button data-v="sistema">Del sistema</button></div></div>
     <div class="field">Papel
       <div class="seg" id="segp"><button data-v="auto">Automático</button><button data-v="claro">Claro</button><button data-v="sepia">Sepia</button><button data-v="noche">Noche</button></div></div>
+    <div class="field">Lectura línea a línea
+      <div class="seg" id="segm"><button data-v="fija">Línea fija</button><button data-v="barrido">Barrido</button></div>
+      <span>Línea fija: la línea se queda quieta y el texto sube. Barrido: la línea baja por la página y, al llegar abajo, pasa a la siguiente.</span></div>
     <label class="check" for="fadapt"><input id="fadapt" type="checkbox"><span>En lectura línea a línea, ajustar la velocidad a mi ritmo cuando avanzo a mano.</span></label>
   </div>
 </section>
@@ -257,7 +260,7 @@ const DB={db:null,mem:{meta:new Map(),text:new Map(),raw:new Map(),kv:new Map()}
 };
 
 /* ---------- Ajustes ---------- */
-const S=Object.assign({size:20,lh:1.6,width:'34em',font:'literata',paper:'auto',wpm:220,adapt:true},LS.get('ml-ajustes',{}));
+const S=Object.assign({size:20,lh:1.6,width:'34em',font:'literata',paper:'auto',wpm:220,adapt:true,flow:'fija'},LS.get('ml-ajustes',{}));
 const FONTS={literata:'"Literata",Georgia,"Times New Roman",serif',atkinson:'"Atkinson Hyperlegible",Verdana,system-ui,sans-serif',sistema:'system-ui,-apple-system,"Segoe UI",sans-serif'};
 const saveS=()=>LS.set('ml-ajustes',S);
 function applyS(){
@@ -265,7 +268,7 @@ function applyS(){
   st.setProperty('--fs',S.size+'px');st.setProperty('--lh',S.lh);st.setProperty('--mw',S.width);st.setProperty('--rf',FONTS[S.font]||FONTS.literata);
   if(S.paper==='auto')delete document.body.dataset.paper;else document.body.dataset.paper=S.paper;
   $('fsize').value=S.size;$('flh').value=S.lh;$('fadapt').checked=!!S.adapt;
-  for(const [id,v] of [['segw',S.width],['segf',S.font],['segp',S.paper]])
+  for(const [id,v] of [['segw',S.width],['segf',S.font],['segp',S.paper],['segm',S.flow]])
     for(const b of $(id).children)b.setAttribute('aria-pressed',b.dataset.v===v?'true':'false');
   $('wpm').textContent=S.wpm+' ppm';
 }
@@ -626,7 +629,7 @@ async function seed(){
 }
 
 /* ---------- Lector ---------- */
-const R={meta:null,blocks:[],cum:[],total:1,secs:[],sec:-1,guided:false,bi:0,li:0,lines:[],curEl:null,onSp:null,playing:false,timer:0,lineT:0,lineWords:0,wl:null};
+const R={dir:1,meta:null,blocks:[],cum:[],total:1,secs:[],sec:-1,guided:false,bi:0,li:0,lines:[],curEl:null,onSp:null,playing:false,timer:0,lineT:0,lineWords:0,wl:null};
 let saveT=0;
 const saveNow=()=>{clearTimeout(saveT);if(R.meta)DB.put('meta',R.meta);};
 const saveSoon=()=>{clearTimeout(saveT);saveT=setTimeout(saveNow,800);};
@@ -720,7 +723,11 @@ function setLine(b,li,byWord){
   if(li<0)li=L.length-1;if(li>=L.length)li=0;
   R.bi=b;R.li=li;R.onSp=L[li];for(const s of L[li])s.classList.add('on');
   const r=L[li][0].getBoundingClientRect();
-  window.scrollTo({top:scrollY+r.top-innerHeight*0.36,behavior:reduce?'auto':'smooth'});
+  if(S.flow==='barrido'){
+    // La página no se mueve: solo cambia cuando la línea se sale por abajo (o por arriba al retroceder)
+    const top=$('bar').getBoundingClientRect().bottom+14,bot=$('gbar').getBoundingClientRect().top-14;
+    if(r.bottom>bot||r.top<top)window.scrollTo(0,R.dir<0?scrollY+r.bottom-bot:scrollY+r.top-top);
+  }else window.scrollTo({top:scrollY+r.top-innerHeight*0.36,behavior:reduce?'auto':'smooth'});
   const w=el._sp.indexOf(L[li][0]),last=b===R.blocks.length-1&&li===L.length-1;
   R.meta.pos={b,w};R.meta.pct=last?1:(R.cum[b]+w/el._sp.length*R.blocks[b].s.length)/R.total;paint();saveSoon();
   R.lineT=performance.now();R.lineWords=L[li].length;
@@ -734,7 +741,8 @@ function step(dir,user){
   }
   let b=R.bi,li=R.li+dir;
   if(li>=R.lines.length){b++;li=0;}else if(li<0){b--;li=-1;}
-  if(!setLine(b,li)){if(dir>0)pause();return;}
+  R.dir=dir;const ok=setLine(b,li);R.dir=1;
+  if(!ok){if(dir>0)pause();return;}
   if(R.playing)schedule();
 }
 function schedule(){
@@ -812,7 +820,7 @@ let rzT=0;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(reline
 $('fsize').oninput=e=>{S.size=+e.target.value;saveS();applyS();reline();};
 $('flh').oninput=e=>{S.lh=+e.target.value;saveS();applyS();reline();};
 $('fadapt').onchange=e=>{S.adapt=e.target.checked;saveS();};
-for(const [id,k] of [['segw','width'],['segf','font'],['segp','paper']])
+for(const [id,k] of [['segw','width'],['segf','font'],['segp','paper'],['segm','flow']])
   $(id).addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S[k]=b.dataset.v;saveS();applyS();reline();});
 $('fgo').oninput=e=>{$('fgol').textContent=e.target.value+' %';};
 $('fgo').onchange=e=>{
