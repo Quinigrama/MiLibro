@@ -88,6 +88,12 @@ button{cursor:pointer}
 #grid,#empty{margin-top:22px}
 #more{display:block;margin:28px auto 0}
 .sheet p{margin:0;font-size:15px}
+.sumbig{font-family:var(--serif);font-size:42px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums}
+.sumbig small{display:block;font-family:var(--ui);font-size:14px;font-weight:400;line-height:1.4;color:var(--muted);margin-top:8px;overflow-wrap:anywhere}
+.sumgrid{display:grid;grid-template-columns:1fr auto auto;gap:10px 18px;align-items:baseline;border-top:1px solid var(--line);padding-top:14px;font-size:15px;font-variant-numeric:tabular-nums}
+.sumgrid .l{color:var(--muted)}
+.sumgrid .v{font-weight:600;text-align:right}
+.sumgrid .p{color:var(--muted);text-align:right;font-size:13.5px}
 .backup{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline;margin-top:40px;font-size:13px;color:var(--muted)}
 .backup span{flex:1 1 100%}
 
@@ -227,6 +233,14 @@ body.guiding #page{padding-bottom:55vh}
   </div>
 </section>
 
+<section class="sheet wrap" id="ssum" hidden aria-label="Tiempo de lectura">
+  <div class="in">
+    <h3>Tiempo de lectura <button class="link" data-close>Cerrar</button></h3>
+    <div class="sumbig" id="sumbig"></div>
+    <div class="sumgrid" id="sumgrid"></div>
+    <button class="btn primary" data-close>Seguir</button>
+  </div>
+</section>
 <section class="sheet wrap" id="sneed" hidden aria-label="Volver a elegir el archivo">
   <div class="in">
     <h3>Hace falta el archivo <button class="link" data-close>Cerrar</button></h3>
@@ -643,7 +657,7 @@ const R={dir:1,meta:null,blocks:[],cum:[],total:1,secs:[],sec:-1,guided:false,bi
 let saveT=0;
 const saveNow=()=>{clearTimeout(saveT);if(R.meta)DB.put('meta',R.meta);};
 const saveSoon=()=>{clearTimeout(saveT);saveT=setTimeout(saveNow,800);};
-const paint=()=>{const p=R.meta.pct||0;$('pfill').style.width=(p*100).toFixed(1)+'%';$('ppct').textContent=pctTxt(p);};
+const paint=()=>{countProg();const p=R.meta.pct||0;$('pfill').style.width=(p*100).toFixed(1)+'%';$('ppct').textContent=pctTxt(p);};
 
 function buildSecs(bl){
   const secs=[];let start=0,acc=0;
@@ -690,12 +704,13 @@ async function openBook(id){
   if(!t||!t.blocks||!t.blocks.length){status('No se encontró el texto de este libro. Quítalo y vuelve a añadirlo.',true);return;}
   R.meta=meta;R.blocks=t.blocks;R.cum=[];let c=0;for(const b of R.blocks){R.cum.push(c);c+=b.s.length;}R.total=c||1;
   R.secs=buildSecs(R.blocks);R.sec=-1;meta.opened=Date.now();if(!meta.pos)meta.pos={b:0,w:0};
+  startTimer(meta);
   $('lib').hidden=true;$('reader').hidden=false;document.body.classList.add('reading');$('rtitle').textContent=meta.title;
   const w=meta.pos.w;showBlock(meta.pos.b||0);R.meta.pos.w=w||0;
 }
 function closeBook(){
-  setGuided(false);saveNow();R.meta=null;$('text').textContent='';
-  $('reader').hidden=true;$('lib').hidden=false;document.body.classList.remove('reading');window.scrollTo(0,0);status('');loadLib().then(renderLib);
+  setGuided(false);const sum=stopTimer();saveNow();R.meta=null;$('text').textContent='';
+  $('reader').hidden=true;$('lib').hidden=false;document.body.classList.remove('reading');window.scrollTo(0,0);status('');loadLib().then(()=>{renderLib();if(sum)showSummary(sum);});
 }
 
 let scT=0;
@@ -825,7 +840,7 @@ addEventListener('keydown',e=>{
   else if(e.key==='p'||e.key==='P'){R.playing?pause():play();}
   else if(e.key==='Escape')setGuided(false);
 });
-document.addEventListener('visibilitychange',()=>{if(document.hidden){if(R.playing)pause();saveNow();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){tick();if(R.playing)pause();saveNow();saveStats();}});
 let rzT=0;addEventListener('resize',()=>{clearTimeout(rzT);rzT=setTimeout(reline,200);});
 $('fsize').oninput=e=>{S.size=+e.target.value;saveS();applyS();reline();};
 $('flh').oninput=e=>{S.lh=+e.target.value;saveS();applyS();reline();};
@@ -838,11 +853,64 @@ $('fgo').onchange=e=>{
   closeSheet();goTo(b);
 };
 
+/* ---------- Tiempo de lectura (no se muestra mientras lees; resumen al salir) ---------- */
+const IDLE=180000;          // sin tocar nada durante 3 min, deja de contar (salvo en avance automático)
+let ST={total:0,words:0,days:{},daysW:{}};
+const T={on:false,last:0,act:0,sess:0,words:0,cp:0,cpT:0,cpw:5.8,iv:0};
+const today=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
+let stsT=0;
+const saveStats=()=>{clearTimeout(stsT);DB.put('kv',{k:'stats',v:ST});};
+const saveStatsSoon=()=>{clearTimeout(stsT);stsT=setTimeout(saveStats,15000);};
+function tick(){
+  const now=Date.now(),dt=Math.min(now-T.last,10000);T.last=now;
+  if(!T.on||document.hidden||!R.meta)return;
+  if(now-T.act>IDLE&&!R.playing)return;
+  const s=dt/1000,k=today();
+  T.sess+=s;R.meta.readSecs=(R.meta.readSecs||0)+s;ST.total+=s;ST.days[k]=(ST.days[k]||0)+s;
+  saveSoon();saveStatsSoon();
+}
+function countProg(){
+  if(!T.on||!R.meta)return;
+  const cp=(R.meta.pct||0)*R.total,now=Date.now(),d=cp-T.cp,dt=now-T.cpT;T.cp=cp;T.cpT=now;
+  if(d<=0)return;
+  const w=d/T.cpw;
+  if(w/(Math.max(dt,1000)/60000)>1200)return;   // un salto (índice, otro capítulo) no cuenta como leído
+  const k=today();
+  T.words+=w;R.meta.readWords=(R.meta.readWords||0)+w;ST.words+=w;ST.daysW[k]=(ST.daysW[k]||0)+w;
+}
+const act=()=>{T.act=Date.now();};
+for(const ev of ['scroll','pointerdown','keydown','wheel','touchstart'])addEventListener(ev,act,{passive:true});
+function startTimer(meta){
+  let words=0;for(const b of R.blocks)words+=(b.s.match(/\S+/g)||[]).length;
+  T.cpw=words?R.total/words:5.8;
+  T.on=true;T.sess=0;T.words=0;T.last=T.act=T.cpT=Date.now();T.cp=(meta.pct||0)*R.total;
+  clearInterval(T.iv);T.iv=setInterval(tick,5000);
+}
+function stopTimer(){
+  if(!T.on)return null;
+  tick();clearInterval(T.iv);T.on=false;saveStats();
+  if(T.sess<20)return null;
+  return {title:R.meta.title,sess:T.sess,words:T.words,book:R.meta.readSecs||0,bookWords:R.meta.readWords||0};
+}
+const dur=s=>{s=Math.round(s);if(s<60)return s+' s';const m=Math.round(s/60);if(m<60)return m+' min';return Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')+' min';};
+const ppm=(w,s)=>s>=60&&w>=50?fmt(Math.round(w/(s/60)))+' ppm':'';
+function showSummary(x){
+  const big=$('sumbig');big.textContent=dur(x.sess);
+  const sm=document.createElement('small');const sp=ppm(x.words,x.sess);
+  sm.textContent='Este rato en «'+x.title+'»'+(sp?' · '+fmt(Math.round(x.words))+' palabras a '+sp:'');
+  big.appendChild(sm);
+  const k=today(),g=$('sumgrid');g.textContent='';
+  for(const [l,s,w] of [['Hoy',ST.days[k]||0,ST.daysW[k]||0],['Este libro',x.book,x.bookWords],['Total',ST.total,ST.words]]){
+    for(const [c,t] of [['l',l],['v',dur(s)],['p',ppm(w,s)]]){const d=document.createElement('span');d.className=c;d.textContent=t;g.appendChild(d);}
+  }
+  openSheet('ssum');
+}
+
 /* ---------- Copia de seguridad (archivo fuera del navegador) ---------- */
 async function saveBackup(){
   status('Preparando la copia…',false,true);
   await loadLib();
-  const parts=['{"app":"milibro","v":1,"date":'+JSON.stringify(new Date().toISOString())+',"settings":'+JSON.stringify(S)
+  const parts=['{"app":"milibro","v":1,"date":'+JSON.stringify(new Date().toISOString())+',"settings":'+JSON.stringify(S)+',"stats":'+JSON.stringify(ST)
     +',"dirs":'+JSON.stringify(DIRS.map(d=>d.name))+',"books":['];
   let first=true;
   for(const m of LIB){
@@ -870,13 +938,20 @@ async function loadBackup(file){
     const bm=b&&b.meta;if(!bm||typeof bm.id!=='string'||typeof bm.title!=='string')continue;
     const cur=(bm.src&&byKey.get(bm.src.key))||byId.get(bm.id);
     let m=bm;
-    if(cur){m=cur;if((bm.opened||0)>=(cur.opened||0)){m.pos=bm.pos||m.pos;m.pct=bm.pct||0;m.opened=bm.opened||0;}}
+    if(cur){m=cur;if((bm.opened||0)>=(cur.opened||0)){m.pos=bm.pos||m.pos;m.pct=bm.pct||0;m.opened=bm.opened||0;}
+      m.readSecs=Math.max(m.readSecs||0,bm.readSecs||0);m.readWords=Math.max(m.readWords||0,bm.readWords||0);}
     if(Array.isArray(b.blocks)&&b.blocks.length){await DB.put('text',{id:m.id,blocks:b.blocks});m.state='ready';}
     else if(!cur){if(!m.src)continue;m.state='pending';}
     await DB.put('meta',m);n++;
   }
   for(const name of data.dirs||[])if(typeof name==='string'&&!DIRS.find(d=>d.name===name))DIRS.push({name,handle:null});
   await saveDirs();
+  const xs=data.stats;
+  if(xs&&typeof xs==='object'){
+    ST.total=Math.max(ST.total,+xs.total||0);ST.words=Math.max(ST.words,+xs.words||0);
+    for(const f of ['days','daysW'])if(xs[f]&&typeof xs[f]==='object')for(const [k,v] of Object.entries(xs[f]))ST[f][k]=Math.max(ST[f][k]||0,+v||0);
+    saveStats();
+  }
   if(data.settings&&typeof data.settings==='object'){Object.assign(S,data.settings);saveS();applyS();}
   await loadLib();renderLib();
   status(`Copia restaurada: ${fmt(n)} ${n===1?'libro':'libros'}, con el punto de lectura de cada uno.`);
@@ -905,6 +980,7 @@ $('status').onclick=()=>status('');
   await DB.open();
   await seed();
   const d=await DB.get('kv','dirs');DIRS=d&&d.v||[];
+  const st=await DB.get('kv','stats');if(st&&st.v)ST=Object.assign({total:0,words:0,days:{},daysW:{}},st.v);
   await loadLib();renderLib();
   if(!DB.db)status('Este navegador no permite guardar datos: lo que añadas se perderá al cerrar la página.',true);
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});}catch(e){}
