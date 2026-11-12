@@ -88,6 +88,8 @@ button{cursor:pointer}
 #grid,#empty{margin-top:22px}
 #more{display:block;margin:28px auto 0}
 .sheet p{margin:0;font-size:15px}
+.backup{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline;margin-top:40px;font-size:13px;color:var(--muted)}
+.backup span{flex:1 1 100%}
 
 /* Lector */
 #bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--paper);border-bottom:1px solid var(--line)}
@@ -158,6 +160,12 @@ body.guiding #page{padding-bottom:55vh}
   <div id="grid"></div>
   <button class="btn" id="more" hidden>Mostrar más</button>
   <div id="empty" hidden>Tu biblioteca está vacía. Pulsa «Añadir libro» o «Añadir carpeta» para traer tus PDF, EPUB o archivos de texto.</div>
+  <div class="backup" id="backup" hidden>
+    <span>La copia de seguridad guarda en un archivo tu lista de libros, los que ya has abierto y por dónde vas en cada uno.</span>
+    <button class="link" id="bksave">Guardar copia</button>
+    <button class="link" id="bkload">Restaurar copia</button>
+    <input id="bkfile" type="file" accept=".json,application/json" hidden>
+  </div>
 </main>
 <div id="status" role="status" aria-live="polite" hidden></div>
 
@@ -829,6 +837,53 @@ $('fgo').onchange=e=>{
   closeSheet();goTo(b);
 };
 
+/* ---------- Copia de seguridad (archivo fuera del navegador) ---------- */
+async function saveBackup(){
+  status('Preparando la copia…',false,true);
+  await loadLib();
+  const parts=['{"app":"milibro","v":1,"date":'+JSON.stringify(new Date().toISOString())+',"settings":'+JSON.stringify(S)
+    +',"dirs":'+JSON.stringify(DIRS.map(d=>d.name))+',"books":['];
+  let first=true;
+  for(const m of LIB){
+    const o={meta:m};
+    if(m.state!=='pending'){const t=await DB.get('text',m.id);if(t&&t.blocks)o.blocks=t.blocks;}
+    parts.push((first?'':',')+JSON.stringify(o));first=false;
+  }
+  parts.push(']}');
+  const d=new Date(),p=n=>String(n).padStart(2,'0');
+  const name=`MiLibro-copia-${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}.json`;
+  const url=URL.createObjectURL(new Blob(parts,{type:'application/json'}));
+  const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),60000);
+  status('Copia guardada en Descargas: '+name);
+}
+async function loadBackup(file){
+  const bad=()=>status('Ese archivo no es una copia de seguridad de Mi Libro.',true);
+  let data;try{data=JSON.parse(await file.text());}catch(e){bad();return;}
+  if(!data||data.app!=='milibro'||!Array.isArray(data.books)){bad();return;}
+  status('Restaurando la copia…',false,true);
+  await loadLib();
+  const byKey=new Map(),byId=new Map();for(const m of LIB){byId.set(m.id,m);if(m.src)byKey.set(m.src.key,m);}
+  let n=0;
+  for(const b of data.books){
+    const bm=b&&b.meta;if(!bm||typeof bm.id!=='string'||typeof bm.title!=='string')continue;
+    const cur=(bm.src&&byKey.get(bm.src.key))||byId.get(bm.id);
+    let m=bm;
+    if(cur){m=cur;if((bm.opened||0)>=(cur.opened||0)){m.pos=bm.pos||m.pos;m.pct=bm.pct||0;m.opened=bm.opened||0;}}
+    if(Array.isArray(b.blocks)&&b.blocks.length){await DB.put('text',{id:m.id,blocks:b.blocks});m.state='ready';}
+    else if(!cur){if(!m.src)continue;m.state='pending';}
+    await DB.put('meta',m);n++;
+  }
+  for(const name of data.dirs||[])if(typeof name==='string'&&!DIRS.find(d=>d.name===name))DIRS.push({name,handle:null});
+  await saveDirs();
+  if(data.settings&&typeof data.settings==='object'){Object.assign(S,data.settings);saveS();applyS();}
+  await loadLib();renderLib();
+  status(`Copia restaurada: ${fmt(n)} ${n===1?'libro':'libros'}, con el punto de lectura de cada uno.`);
+}
+$('bksave').onclick=()=>saveBackup().catch(()=>status('No se pudo guardar la copia.',true));
+$('bkload').onclick=()=>$('bkfile').click();
+$('bkfile').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)loadBackup(f).catch(()=>status('No se pudo restaurar la copia.',true));});
+
 /* ---------- Instalación (solo en la versión publicada con manifest) ---------- */
 let instEv=null;
 const standalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
@@ -852,6 +907,7 @@ $('status').onclick=()=>status('');
   if(!DB.db)status('Este navegador no permite guardar datos: lo que añadas se perderá al cerrar la página.',true);
   try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist().catch(()=>{});}catch(e){}
   if(document.querySelector('link[rel="manifest"]')&&!standalone())$('install').hidden=false;
+  if(document.querySelector('link[rel="manifest"]'))$('backup').hidden=false;
   // Solo en la versión instalable (la que trae manifest): permite abrir la app sin conexión
   if(document.querySelector('link[rel="manifest"]')&&'serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 })();
