@@ -736,7 +736,7 @@ addEventListener('scroll',()=>{if(scT||(R.guided&&!slide())||!R.meta)return;scT=
 function track(){
   if(!R.meta||(R.guided&&!slide())||$('reader').hidden)return;
   const top=$('bar').getBoundingClientRect().bottom+4;let b=null;
-  for(const el of $('text').children)if(el.getBoundingClientRect().bottom>top){b=+el.dataset.i;break;}
+  for(const el of $('text').children)if(el.dataset.i&&el.getBoundingClientRect().bottom>top){b=+el.dataset.i;break;}
   if(b==null)return;
   const end=R.sec===R.secs.length-1&&innerHeight+scrollY>=document.documentElement.scrollHeight-40;
   R.meta.pos={b,w:0};R.meta.pct=end?1:R.cum[b]/R.total;paint();saveSoon();
@@ -805,14 +805,20 @@ function pxPerWord(){
 }
 function slideLoop(){
   cancelAnimationFrame(R.raf);
-  let last=performance.now(),acc=0;
+  let last=performance.now(),acc=0,hold=last+1000;   // al arrancar, un segundo quieto para situar la vista
   const f=now=>{
     if(!R.playing||!slide())return;
     const dt=Math.min(now-last,100);last=now;
+    if(now<hold){R.raf=requestAnimationFrame(f);return;}
     acc+=S.wpm/60*pxPerWord()*dt/1000;
     if(acc>=1){const n=Math.floor(acc);acc-=n;window.scrollBy(0,n);}
     if(innerHeight+scrollY>=document.documentElement.scrollHeight-2){
-      if(R.sec<R.secs.length-1){showBlock(R.secs[R.sec+1][0]);R.ppw=0;acc=0;}
+      if(R.sec<R.secs.length-1){
+        // Página nueva: empieza a un tercio de pantalla y espera 1,5 s antes de moverse
+        showBlock(R.secs[R.sec+1][0]);R.ppw=0;pxPerWord();acc=0;hold=now+1500;
+        const gap=document.createElement('div');gap.className='slidegap';gap.style.height=Math.round(innerHeight*0.35)+'px';
+        $('text').prepend(gap);window.scrollTo(0,0);
+      }
       else{pause();return;}
     }
     R.raf=requestAnimationFrame(f);
