@@ -94,6 +94,14 @@ button{cursor:pointer}
 .sumgrid .l{color:var(--muted)}
 .sumgrid .v{font-weight:600;text-align:right}
 .sumgrid .p{color:var(--muted);text-align:right;font-size:13.5px}
+.bars{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;align-items:end;border-top:1px solid var(--line);padding-top:14px}
+.bars div{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:0}
+.bars i{display:block;width:100%;max-width:30px;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px;opacity:.55}
+.bars div.hoy i{opacity:1}
+.bars div.hoy b{color:var(--ink)}
+.bars b{font-weight:600}
+.statnote{font-size:14px;color:var(--muted)}
+#bstats{font-size:18px;padding:6px 12px}
 .backup{display:flex;flex-wrap:wrap;gap:4px 18px;align-items:baseline;margin-top:40px;font-size:13px;color:var(--muted)}
 .backup span{flex:1 1 100%}
 
@@ -150,6 +158,7 @@ body.guiding #page{padding-bottom:55vh}
     <h1>Mi Libro</h1>
     <span class="stamp">100 % local</span>
     <div class="adds">
+      <button class="btn" id="bstats" aria-label="Estadísticas de lectura" title="Estadísticas de lectura">⏳</button>
       <button class="btn" id="install" hidden>Instalar app</button>
       <button class="btn" id="adddir">Añadir carpeta</button>
       <label class="btn primary add">+ Añadir libro
@@ -220,8 +229,8 @@ body.guiding #page{padding-bottom:55vh}
     <div class="field">Papel
       <div class="seg" id="segp"><button data-v="auto">Automático</button><button data-v="claro">Claro</button><button data-v="sepia">Sepia</button><button data-v="noche">Noche</button></div></div>
     <div class="field">Lectura línea a línea
-      <div class="seg" id="segm"><button data-v="fija">Línea fija</button><button data-v="barrido">Barrido</button></div>
-      <span>Línea fija: la línea se queda quieta y el texto sube. Barrido: la línea baja por la página y, al llegar abajo, pasa a la siguiente.</span></div>
+      <div class="seg" id="segm"><button data-v="fija">Línea fija</button><button data-v="barrido">Barrido</button><button data-v="deslizar">Deslizar</button></div>
+      <span>Línea fija: la línea se queda quieta y el texto sube. Barrido: la línea baja por la página y, al llegar abajo, pasa a la siguiente. Deslizar: el texto sube solo, sin resaltar, a tu velocidad en palabras por minuto; toca el texto para pausar.</span></div>
     <label class="check" for="fadapt"><input id="fadapt" type="checkbox"><span>En lectura línea a línea, ajustar la velocidad a mi ritmo cuando avanzo a mano.</span></label>
   </div>
 </section>
@@ -233,6 +242,14 @@ body.guiding #page{padding-bottom:55vh}
   </div>
 </section>
 
+<section class="sheet wrap" id="sstats" hidden aria-label="Estadísticas de lectura">
+  <div class="in">
+    <h3>⏳ Estadísticas de lectura <button class="link" data-close>Cerrar</button></h3>
+    <div class="sumbig" id="stbig"></div>
+    <div class="bars" id="stbars"></div>
+    <div class="sumgrid" id="stgrid"></div>
+  </div>
+</section>
 <section class="sheet wrap" id="ssum" hidden aria-label="Tiempo de lectura">
   <div class="in">
     <h3>Tiempo de lectura <button class="link" data-close>Cerrar</button></h3>
@@ -294,7 +311,7 @@ function applyS(){
   for(const [id,v] of [['segw',S.width],['segf',S.font],['segp',S.paper],['segm',S.flow]])
     for(const b of $(id).children)b.setAttribute('aria-pressed',b.dataset.v===v?'true':'false');
   $('wpm').textContent=S.wpm+' ppm';
-  $('bguide').textContent=S.flow==='barrido'?'Barrido':'Línea';
+  $('bguide').textContent=({barrido:'Barrido',deslizar:'Deslizar'})[S.flow]||'Línea';R.ppw=0;
 }
 
 /* ---------- Conversión de archivos ---------- */
@@ -653,7 +670,8 @@ async function seed(){
 }
 
 /* ---------- Lector ---------- */
-const R={dir:1,meta:null,blocks:[],cum:[],total:1,secs:[],sec:-1,guided:false,bi:0,li:0,lines:[],curEl:null,onSp:null,playing:false,timer:0,lineT:0,lineWords:0,wl:null};
+const slide=()=>S.flow==='deslizar';
+const R={raf:0,ppw:0,dir:1,meta:null,blocks:[],cum:[],total:1,secs:[],sec:-1,guided:false,bi:0,li:0,lines:[],curEl:null,onSp:null,playing:false,timer:0,lineT:0,lineWords:0,wl:null};
 let saveT=0;
 const saveNow=()=>{clearTimeout(saveT);if(R.meta)DB.put('meta',R.meta);};
 const saveSoon=()=>{clearTimeout(saveT);saveT=setTimeout(saveNow,800);};
@@ -683,7 +701,7 @@ function showBlock(b){
   if(b===R.secs[i][0])window.scrollTo(0,0);else blkEl(b).scrollIntoView({block:'start'});
   R.meta.pos={b,w:0};R.meta.pct=R.cum[b]/R.total;paint();saveSoon();
 }
-const goTo=b=>{if(R.guided){setLine(clamp(b,0,R.blocks.length-1),0);if(R.playing)schedule();}else showBlock(b);};
+const goTo=b=>{if(R.guided&&!slide()){setLine(clamp(b,0,R.blocks.length-1),0);if(R.playing)schedule();}else showBlock(b);};
 
 async function openBook(id){
   if(busy)return;
@@ -714,9 +732,9 @@ function closeBook(){
 }
 
 let scT=0;
-addEventListener('scroll',()=>{if(scT||R.guided||!R.meta)return;scT=setTimeout(()=>{scT=0;track();},250);},{passive:true});
+addEventListener('scroll',()=>{if(scT||(R.guided&&!slide())||!R.meta)return;scT=setTimeout(()=>{scT=0;track();},250);},{passive:true});
 function track(){
-  if(!R.meta||R.guided||$('reader').hidden)return;
+  if(!R.meta||(R.guided&&!slide())||$('reader').hidden)return;
   const top=$('bar').getBoundingClientRect().bottom+4;let b=null;
   for(const el of $('text').children)if(el.getBoundingClientRect().bottom>top){b=+el.dataset.i;break;}
   if(b==null)return;
@@ -760,6 +778,7 @@ function setLine(b,li,byWord){
 }
 function step(dir,user){
   if(!R.guided)return;
+  if(slide()){window.scrollBy(0,Math.round(dir*S.size*S.lh));return;}
   if(user&&dir>0&&S.adapt&&R.lineWords>=4){
     const dt=(performance.now()-R.lineT)/1000,exp=R.lineWords*60/S.wpm;
     if(dt>0.3&&dt<3*exp){S.wpm=clamp(Math.round((S.wpm*0.7+R.lineWords/dt*60*0.3)/5)*5,60,900);saveS();$('wpm').textContent=S.wpm+' ppm';}
@@ -772,20 +791,46 @@ function step(dir,user){
 }
 function schedule(){
   clearTimeout(R.timer);
+  if(slide())return;
   let ms=Math.max(400,R.lineWords*60000/S.wpm);if(R.li===R.lines.length-1)ms+=250;
   R.timer=setTimeout(()=>step(1,false),ms);
 }
+// Píxeles por palabra en el tramo que se ve: así la velocidad en ppm vale para cualquier tamaño de letra
+function pxPerWord(){
+  if(!R.ppw){
+    const [a,z]=R.secs[R.sec];let w=0;for(let k=a;k<z;k++)w+=(R.blocks[k].s.match(/\S+/g)||[]).length;
+    R.ppw=w?$('text').offsetHeight/w:S.size*S.lh/10;
+  }
+  return R.ppw;
+}
+function slideLoop(){
+  cancelAnimationFrame(R.raf);
+  let last=performance.now(),acc=0;
+  const f=now=>{
+    if(!R.playing||!slide())return;
+    const dt=Math.min(now-last,100);last=now;
+    acc+=S.wpm/60*pxPerWord()*dt/1000;
+    if(acc>=1){const n=Math.floor(acc);acc-=n;window.scrollBy(0,n);}
+    if(innerHeight+scrollY>=document.documentElement.scrollHeight-2){
+      if(R.sec<R.secs.length-1){showBlock(R.secs[R.sec+1][0]);R.ppw=0;acc=0;}
+      else{pause();return;}
+    }
+    R.raf=requestAnimationFrame(f);
+  };
+  R.raf=requestAnimationFrame(f);
+}
 async function wake(on){try{if(on&&navigator.wakeLock)R.wl=await navigator.wakeLock.request('screen');else if(!on&&R.wl){await R.wl.release();R.wl=null;}}catch(e){}}
-function play(){R.playing=true;$('gplay').textContent='❚❚';$('gplay').setAttribute('aria-label','Pausar el avance automático');R.lineT=performance.now();schedule();wake(true);}
-function pause(){R.playing=false;clearTimeout(R.timer);$('gplay').textContent='▶';$('gplay').setAttribute('aria-label','Avance automático');wake(false);}
+function play(){R.playing=true;if(slide()){slideLoop();$('gplay').textContent='❚❚';$('gplay').setAttribute('aria-label','Pausar el desplazamiento');wake(true);return;}$('gplay').textContent='❚❚';$('gplay').setAttribute('aria-label','Pausar el avance automático');R.lineT=performance.now();schedule();wake(true);}
+function pause(){R.playing=false;clearTimeout(R.timer);cancelAnimationFrame(R.raf);$('gplay').textContent='▶';$('gplay').setAttribute('aria-label','Avance automático');wake(false);}
 function setGuided(on){
   if(on===R.guided)return;
-  R.guided=on;$('text').classList.toggle('guided',on);$('gbar').hidden=!on;$('pager').hidden=on;
+  R.guided=on;$('text').classList.toggle('guided',on&&!slide());$('gbar').hidden=!on;$('pager').hidden=on;
   document.body.classList.toggle('guiding',on);$('bguide').setAttribute('aria-pressed',on?'true':'false');
-  if(on){track();setLine(R.meta.pos.b||0,0,R.meta.pos.w||0);}
+  if(on&&slide()){track();play();}
+  else if(on){track();setLine(R.meta.pos.b||0,0,R.meta.pos.w||0);}
   else{pause();if(R.onSp)for(const s of R.onSp)s.classList.remove('on');unwrap(R.curEl);R.curEl=null;R.onSp=null;}
 }
-const reline=()=>{if(R.guided&&R.meta){setLine(R.bi,0,R.meta.pos.w||0);if(R.playing)schedule();}};
+const reline=()=>{R.ppw=0;if(R.guided&&R.meta&&!slide()){setLine(R.bi,0,R.meta.pos.w||0);if(R.playing)schedule();}};
 
 /* ---------- Paneles ---------- */
 let sheet=null;
@@ -827,7 +872,8 @@ $('gplay').onclick=()=>R.playing?pause():play();
 const speed=d=>{S.wpm=clamp(S.wpm+d,60,900);saveS();$('wpm').textContent=S.wpm+' ppm';if(R.playing)schedule();};
 $('gslow').onclick=()=>speed(-10);$('gfast').onclick=()=>speed(10);
 $('text').addEventListener('click',e=>{
-  if(!R.guided)return;const el=e.target.closest('.blk');if(!el)return;
+  if(!R.guided)return;
+  if(slide()){R.playing?pause():play();return;}const el=e.target.closest('.blk');if(!el)return;
   wrap(el);const t=document.elementFromPoint(e.clientX,e.clientY);
   const w=t&&t.classList&&t.classList.contains('w')?el._sp.indexOf(t):0;
   setLine(+el.dataset.i,0,Math.max(0,w));if(R.playing)schedule();
@@ -847,6 +893,7 @@ $('flh').oninput=e=>{S.lh=+e.target.value;saveS();applyS();reline();};
 $('fadapt').onchange=e=>{S.adapt=e.target.checked;saveS();};
 for(const [id,k] of [['segw','width'],['segf','font'],['segp','paper'],['segm','flow']])
   $(id).addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;S[k]=b.dataset.v;saveS();applyS();reline();});
+$('segm').addEventListener('click',()=>{if(R.guided){setGuided(false);setGuided(true);if(slide())pause();}});
 $('fgo').oninput=e=>{$('fgol').textContent=e.target.value+' %';};
 $('fgo').onchange=e=>{
   const target=+e.target.value/100*R.total;let b=R.cum.findIndex(c=>c>=target);if(b<0)b=R.blocks.length-1;
@@ -857,7 +904,8 @@ $('fgo').onchange=e=>{
 const IDLE=180000;          // sin tocar nada durante 3 min, deja de contar (salvo en avance automático)
 let ST={total:0,words:0,days:{},daysW:{}};
 const T={on:false,last:0,act:0,sess:0,words:0,cp:0,cpT:0,cpw:5.8,iv:0};
-const today=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
+const dkey=d=>{const p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
+const today=()=>dkey(new Date());
 let stsT=0;
 const saveStats=()=>{clearTimeout(stsT);DB.put('kv',{k:'stats',v:ST});};
 const saveStatsSoon=()=>{clearTimeout(stsT);stsT=setTimeout(saveStats,15000);};
@@ -905,6 +953,46 @@ function showSummary(x){
   }
   openSheet('ssum');
 }
+
+function showStats(){
+  const big=$('stbig'),bars=$('stbars'),g=$('stgrid');big.textContent=dur(ST.total);
+  const sm=document.createElement('small');
+  if(ST.total<20){
+    big.textContent='0 min';sm.textContent='Aún no hay tiempo registrado. Abre un libro y lee un rato: al salir verás el resumen y aquí se irá sumando todo.';
+    big.appendChild(sm);bars.hidden=true;g.hidden=true;openSheet('sstats');return;
+  }
+  bars.hidden=false;g.hidden=false;
+  sm.textContent='Tiempo total leyendo · '+fmt(Math.round(ST.words))+' palabras';big.appendChild(sm);
+  const day=n=>{const d=new Date();d.setHours(12);d.setDate(d.getDate()-n);return d;};
+  // Últimos 7 días
+  bars.textContent='';let w7=0,s7=0,max=0;const L=['D','L','M','X','J','V','S'],ds=[];
+  for(let i=6;i>=0;i--){const d=day(i),k=dkey(d),v=ST.days[k]||0;ds.push([d,v]);max=Math.max(max,v);s7+=v;w7+=ST.daysW[k]||0;}
+  ds.forEach(([d,v],i)=>{
+    const c=document.createElement('div');if(i===6)c.className='hoy';
+    const n=document.createElement('span');n.textContent=v>=60?Math.round(v/60)+'′':'';
+    const bar=document.createElement('i');bar.style.height=(max?Math.max(2,Math.round(70*v/max)):2)+'px';
+    const b=document.createElement('b');b.textContent=i===6?'Hoy':L[d.getDay()];
+    c.title=dur(v);c.append(n,bar,b);bars.appendChild(c);
+  });
+  // Racha: días seguidos con al menos 1 minuto (si hoy aún no has leído, cuenta desde ayer)
+  let r=0,i=(ST.days[today()]||0)>=60?0:1;while((ST.days[dkey(day(i))]||0)>=60){r++;i++;}
+  let best=0,run=0;const ks=Object.keys(ST.days).filter(k=>ST.days[k]>=60).sort();
+  for(let j=0;j<ks.length;j++){const prev=j&&new Date(ks[j]+'T12:00')-new Date(ks[j-1]+'T12:00')<=36e5*30;run=prev?run+1:1;best=Math.max(best,run);}
+  const nd=Object.values(ST.days).filter(v=>v>=60).length;
+  const fin=LIB.filter(m=>(m.pct||0)>=0.98&&m.id!=='guia').length;
+  const k=today();
+  g.textContent='';
+  for(const [l,v,p] of [
+    ['Hoy',dur(ST.days[k]||0),ppm(ST.daysW[k]||0,ST.days[k]||0)],
+    ['Últimos 7 días',dur(s7),ppm(w7,s7)],
+    ['Velocidad media',ppm(ST.words,ST.total)||'—',''],
+    ['Racha',r+(r===1?' día':' días'),'mejor: '+best],
+    ['Media por día leído',nd?dur(ST.total/nd):'—',''],
+    ['Libros terminados',fmt(fin),'']
+  ])for(const [c,t] of [['l',l],['v',v],['p',p]]){const d=document.createElement('span');d.className=c;d.textContent=t;g.appendChild(d);}
+  openSheet('sstats');
+}
+$('bstats').onclick=()=>{loadLib().then(showStats);};
 
 /* ---------- Copia de seguridad (archivo fuera del navegador) ---------- */
 async function saveBackup(){
